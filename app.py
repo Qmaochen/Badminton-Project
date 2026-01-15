@@ -1,6 +1,7 @@
 import streamlit as st
 import random
 import pandas as pd
+from streamlit_keep_awake import keep_awake # <--- 新增這行
 
 # ==========================================
 # 1. 核心邏輯區
@@ -229,6 +230,7 @@ class BadmintonManager:
 # ==========================================
 
 st.set_page_config(page_title="羽球排點系統", page_icon="🏸", layout="wide")
+keep_awake(label="讓螢幕保持恆亮 (打球時請勿關閉)", error_message="您的瀏覽器不支援喚醒鎖定")
 
 if 'manager' not in st.session_state:
     st.session_state.manager = BadmintonManager()
