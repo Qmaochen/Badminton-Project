@@ -1,7 +1,34 @@
 import streamlit as st
 import random
 import pandas as pd
-from streamlit_keep_awake import keep_awake # <--- 新增這行
+import streamlit.components.v1 as components  # <--- 1. 改用這個內建元件
+
+# ==========================================
+# 0. 防睡功能 (免安裝套件版)
+# ==========================================
+def keep_awake():
+    # 這是直接注入 JavaScript，請求瀏覽器保持螢幕開啟
+    keep_awake_js = """
+    <script>
+    async function getWakeLock() {
+        try {
+            const wakeLock = await navigator.wakeLock.request('screen');
+            console.log('Wake Lock is active!');
+        } catch (err) {
+            console.log(`${err.name}, ${err.message}`);
+        }
+    }
+    // 網頁載入時執行
+    getWakeLock();
+    // 當使用者切換分頁回來時，再次執行
+    document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState === 'visible') {
+            getWakeLock();
+        }
+    });
+    </script>
+    """
+    components.html(keep_awake_js, height=0, width=0)
 
 # ==========================================
 # 1. 核心邏輯區
@@ -13,18 +40,17 @@ class BadmintonManager:
         self.courts_num = 2
         
         # 數據統計
-        self.play_counts = {}       # {人名: 上場總次數}
-        self.consecutive_rests = {} # {人名: 連續休息次數}
+        self.play_counts = {}       
+        self.consecutive_rests = {} 
         
-        self.partner_history = {}   # {(p1, p2): 搭檔次數}
-        self.opponent_history = {}  # {(p1, p2): 對戰次數}
-        self.match_history = []     # 記錄比分
+        self.partner_history = {}   
+        self.opponent_history = {}  
+        self.match_history = []     
         
         # 場地狀態
         self.courts_status = {}  
         self.busy_players = set()   
         
-        # 初始化球場
         self._init_courts()
 
     def _init_courts(self):
@@ -44,22 +70,14 @@ class BadmintonManager:
         self.consecutive_rests[name] = 0
         return True, f"已加入球員: {name}"
 
-    # --- 新增功能：移除球員 ---
     def remove_player(self, name):
         if name not in self.players:
             return False, "找不到此球員"
         
-        # 防呆：如果在場上打球，不能移除
         if name in self.busy_players:
             return False, f"⚠️ {name} 正在場上比賽中，請先結算該場比賽後再移除。"
 
-        # 從活躍名單移除 (這會讓他不再被排入比賽)
         self.players.remove(name)
-        
-        # 我們選擇「保留」他在 play_counts 的紀錄，
-        # 這樣他今天打過的場次在最後戰報還是看得到，只是之後不會再排到他。
-        
-        # 但可以從「連續休息計數」中移除，節省記憶體
         if name in self.consecutive_rests:
             del self.consecutive_rests[name]
 
@@ -100,13 +118,11 @@ class BadmintonManager:
                 logs.append(f"⚠️ 球場 {cid}: 剩餘人數不足 ({len(available)}人)，暫時閒置。")
                 continue
 
-            # 雙重排序：(優先) 休息次數大 -> (次要) 上場次數小
             random.shuffle(available)
             available.sort(key=lambda x: (-self.consecutive_rests.get(x, 0), self.play_counts.get(x, 0)))
             
             group = available[:4]
             
-            # --- 找最佳組合 ---
             best_combo = None
             min_cost = float('inf')
             
@@ -139,8 +155,6 @@ class BadmintonManager:
             
             logs.append(f"✅ 球場 {cid}: {team1[0]}&{team1[1]} vs {team2[0]}&{team2[1]}")
         
-        # 統一結算休息次數
-        # 只針對「還在名單內」的人更新
         for p in self.players:
             if p in self.busy_players:
                 self.consecutive_rests[p] = 0
@@ -162,19 +176,16 @@ class BadmintonManager:
             'score': score_str if score_str else "無紀錄"
         })
         
-        # 記錄搭檔歷史
         key1 = tuple(sorted(t1))
         key2 = tuple(sorted(t2))
         self.partner_history[key1] = self.partner_history.get(key1, 0) + 1
         self.partner_history[key2] = self.partner_history.get(key2, 0) + 1
         
-        # 記錄對手歷史
         for p_a in t1:
             for p_b in t2:
                 key_opp = tuple(sorted((p_a, p_b)))
                 self.opponent_history[key_opp] = self.opponent_history.get(key_opp, 0) + 1
         
-        # 釋放球員
         for p in match['players']:
             self.busy_players.discard(p)
         
@@ -188,18 +199,14 @@ class BadmintonManager:
         else:
             df_history = pd.DataFrame(columns=['隊伍A', '隊伍B', '比分'])
 
-        # 這裡要注意：self.play_counts 裡可能包含已經移除的人
-        # 我們希望戰報還是顯示他們，所以遍歷 play_counts 而不是 self.players
         if self.play_counts:
             data = []
             for name, count in self.play_counts.items():
-                # 標記已離開的人
                 status_suffix = " (已離)" if name not in self.players else ""
-                
                 data.append({
                     "姓名": name + status_suffix, 
                     "上場次數": count, 
-                    "目前連休": self.consecutive_rests.get(name, "-") # 已離開的人顯示 -
+                    "目前連休": self.consecutive_rests.get(name, "-") 
                 })
             df_stats = pd.DataFrame(data)
             df_stats = df_stats.sort_values(by="上場次數", ascending=False)
@@ -230,7 +237,9 @@ class BadmintonManager:
 # ==========================================
 
 st.set_page_config(page_title="羽球排點系統", page_icon="🏸", layout="wide")
-keep_awake(label="讓螢幕保持恆亮 (打球時請勿關閉)", error_message="您的瀏覽器不支援喚醒鎖定")
+
+# 呼叫防睡函式 (這會隱藏在背景執行)
+keep_awake()
 
 if 'manager' not in st.session_state:
     st.session_state.manager = BadmintonManager()
@@ -241,7 +250,6 @@ mgr = st.session_state.manager
 with st.sidebar:
     st.header("⚙️ 設定與管理")
     
-    # 球場數設定
     new_court_num = st.number_input("球場數量", min_value=1, max_value=20, value=mgr.courts_num)
     if new_court_num != mgr.courts_num:
         mgr.update_courts_num(new_court_num)
@@ -249,7 +257,6 @@ with st.sidebar:
 
     st.divider()
 
-    # 新增球員
     st.subheader("➕ 新增球員")
     with st.form("add_player_form", clear_on_submit=True):
         new_name = st.text_input("輸入名字")
@@ -263,16 +270,14 @@ with st.sidebar:
     
     st.divider()
 
-    # --- 新增功能：移除球員區塊 ---
     st.subheader("🗑️ 移除球員 (提早離開)")
-    # 使用 selectbox 避免打錯字，只顯示還在名單內的人
     if mgr.players:
         player_to_remove = st.selectbox("選擇要移除的球員", mgr.players, key="remove_select")
         if st.button("確認移除", type="secondary"):
             success, msg = mgr.remove_player(player_to_remove)
             if success:
                 st.success(msg)
-                st.rerun() # 重新整理畫面以更新名單
+                st.rerun() 
             else:
                 st.error(msg)
     else:
@@ -280,7 +285,6 @@ with st.sidebar:
     
     st.divider()
 
-    # 統計表格
     st.subheader("📊 上場統計")
     st.caption("連休 = 目前連續休息幾場")
     if mgr.play_counts:
@@ -290,7 +294,6 @@ with st.sidebar:
     else:
         st.text("尚無球員資料")
 
-    # 存檔與下載
     st.divider()
     st.header("💾 資料存檔")
     
@@ -314,7 +317,6 @@ with st.sidebar:
     
     with st.expander("📋 複製文字戰報"):
         st.text_area("內容", mgr.generate_text_report(), height=250)
-
 
 # --- 主畫面 ---
 st.title("🏸 羽球排點系統")
